@@ -1,0 +1,23 @@
+qzone:
+  cookies: ""
+  uin: ""
+  poll_interval: 60
+onebot:
+  host: "127.0.0.1"
+  port: 5700
+  access_token: ""
+keywords: []
+monitor_list: []
+group_sources: []
+forward_list: []
+actions:
+  forward: false
+  like: false
+  comment: false
+  comment_mode: template
+  ai:
+    enabled: false
+    api_url: "https://api.deepseek.com/v1/chat/completions"
+    api_key: ""
+    model: "deepseek-chat"
+data_dir: data

@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QQ空间转发工具</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <h1>📨 QQ空间转发工具</h1>
+            <div class="header-status">
+                <span class="status-badge" id="schedulerStatus">
+                    {{ "🟢 运行中" if scheduler_running else "🔴 已停止" }}
+                </span>
+                <span class="status-badge" id="onebotStatus">⏳ 检测中...</span>
+            </div>
+        </header>
+
+        <!-- 主内容 -->
+        <div class="main-grid">
+            <!-- 左侧面板 -->
+            <div class="left-panel">
+                <!-- 快速启动 -->
+                <section class="card">
+                    <h2>🚀 快速启动</h2>
+                    <div class="quickstart">
+                        <!-- 步骤1: 扫码登录 -->
+                        <div class="qs-step" id="qsStep1">
+                            <div class="qs-step-header">
+                                <span class="qs-step-num">1</span>
+                                <span class="qs-step-title">QQ 空间扫码登录</span>
+                                <span class="qs-step-status" id="loginStatus">检测中...</span>
+                            </div>
+                            <div class="qs-step-body">
+                                <button class="btn btn-primary" id="btnQRLogin" onclick="startQRLogin()">📱 扫码登录</button>
+                                <div id="qrContainer" style="display:none">
+                                    <img id="qrImage" alt="登录二维码" title="请用手机 QQ 扫描">
+                                    <div id="qrStatusText" class="test-result"></div>
+                                    <div class="btn-group" style="justify-content:center;margin-top:6px">
+                                        <button class="btn btn-sm btn-outline" onclick="startQRLogin()">🔄 刷新二维码</button>
+                                    </div>
+                                </div>
+                                <div class="help-text" style="margin-top:6px;margin-bottom:0">
+                                    登录成功后 Cookies 与 QQ 号将自动写入配置，无需手动抓取
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 步骤2: OneBot -->
+                        <div class="qs-step" id="qsStep2">
+                            <div class="qs-step-header">
+                                <span class="qs-step-num">2</span>
+                                <span class="qs-step-title">OneBot 客户端</span>
+                                <span class="qs-step-status" id="qsOnebotStatus">检测中...</span>
+                            </div>
+                            <div class="qs-step-body">
+                                启动 Lagrange / go-cqhttp 并开启 HTTP API（默认 127.0.0.1:5700），可在「OneBot」标签页修改地址
+                            </div>
+                        </div>
+
+                        <!-- 步骤3: 一键启动 -->
+                        <div class="qs-step" id="qsStep3">
+                            <div class="qs-step-header">
+                                <span class="qs-step-num">3</span>
+                                <span class="qs-step-title">启动服务</span>
+                                <span class="qs-step-status" id="qsSchedulerStatus">-</span>
+                            </div>
+                            <div class="qs-step-body">
+                                <button class="btn btn-success" id="btnQuickStart" onclick="quickStart()">⚡ 一键启动</button>
+                                <span id="quickStartResult" class="test-result"></span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 调度器控制 -->
+                <section class="card">
+                    <h2>⚙️ 调度控制</h2>
+                    <div class="stats-row">
+                        <div class="stat-item">
+                            <span class="stat-value" id="statChecked">{{ scheduler_stats.total_checked or 0 }}</span>
+                            <span class="stat-label">已检查</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="statMatched">{{ scheduler_stats.total_matched or 0 }}</span>
+                            <span class="stat-label">已匹配</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="statForwarded">{{ forwarded_count }}</span>
+                            <span class="stat-label">已转发</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="statLiked">{{ scheduler_stats.total_liked or 0 }}</span>
+                            <span class="stat-label">已点赞</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="statCommented">{{ scheduler_stats.total_commented or 0 }}</span>
+                            <span class="stat-label">已评论</span>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-success" id="btnStart" onclick="schedulerStart()" {{ "disabled" if scheduler_running }}>▶ 启动</button>
+                        <button class="btn btn-danger" id="btnStop" onclick="schedulerStop()" {{ "disabled" if not scheduler_running }}>⏹ 停止</button>
+                    </div>
+                </section>
+
+                <!-- 配置区 -->
+                <section class="card">
+                    <h2>🔧 配置</h2>
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="tab-qzone">QQ空间</button>
+                        <button class="tab-btn" data-tab="tab-onebot">OneBot</button>
+                        <button class="tab-btn" data-tab="tab-keywords">关键词</button>
+                        <button class="tab-btn" data-tab="tab-group">群来源</button>
+                        <button class="tab-btn" data-tab="tab-monitor">监控列表</button>
+                        <button class="tab-btn" data-tab="tab-forward">转发列表</button>
+                        <button class="tab-btn" data-tab="tab-actions">动作</button>
+                    </div>
+
+                    <!-- Qzone 配置 -->
+                    <div class="tab-content active" id="tab-qzone">
+                        <div class="form-group">
+                            <label>Cookies <span class="help">(扫码登录后自动填写，也可手动粘贴)</span></label>
+                            <textarea id="qzoneCookies" rows="3" placeholder="扫码登录后自动填写">{{ config.qzone.cookies[:20] + '***' if config.qzone.cookies else '' }}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>当前 QQ 号</label>
+                            <input type="text" id="qzoneUin" value="{{ config.qzone.uin }}" placeholder="你的 QQ 号">
+                        </div>
+                        <div class="form-group">
+                            <label>轮询间隔 (秒) <span class="help">最小 15 秒</span></label>
+                            <input type="number" id="qzonePollInterval" value="{{ config.qzone.poll_interval }}" min="15" max="3600">
+                        </div>
+                        <button class="btn btn-sm" onclick="testQzone()">🔄 测试连接</button>
+                        <span id="testQzoneResult" class="test-result"></span>
+                    </div>
+
+                    <!-- OneBot 配置 -->
+                    <div class="tab-content" id="tab-onebot">
+                        <div class="form-group">
+                            <label>OneBot 地址</label>
+                            <input type="text" id="onebotHost" value="{{ config.onebot.host }}" placeholder="127.0.0.1">
+                        </div>
+                        <div class="form-group">
+                            <label>端口</label>
+                            <input type="number" id="onebotPort" value="{{ config.onebot.port }}" placeholder="5700">
+                        </div>
+                        <div class="form-group">
+                            <label>Access Token（可选）</label>
+                            <input type="password" id="onebotToken" value="{{ config.onebot.access_token[:6] + '***' if config.onebot.access_token else '' }}" placeholder="留空则不使用">
+                        </div>
+                        <button class="btn btn-sm" onclick="testOnebot()">🔄 测试连接</button>
+                        <span id="testOnebotResult" class="test-result"></span>
+                    </div>
+
+                    <!-- 关键词配置 -->
+                    <div class="tab-content" id="tab-keywords">
+                        <p class="help-text">
+                            每行一个关键词。支持格式:<br>
+                            <code>关键词</code> - 包含即匹配<br>
+                            <code>-排除词</code> - 包含此词则不转发<br>
+                            <code>+必须词</code> - 必须包含此词
+                        </p>
+                        <div class="form-group">
+                            <textarea id="keywordsText" rows="6" placeholder="输入关键词，每行一个">{% for kw in config.keywords %}{{ kw }}
+{% endfor %}</textarea>
+                        </div>
+                    </div>
+
+                    <!-- 群来源（自动导入群成员到监控列表） -->
+                    <div class="tab-content" id="tab-group">
+                        <p class="help-text">配置群来源后，启动时会自动将群成员导入到监控列表，实现监控全群成员的空间动态</p>
+                        <div id="groupSourceList">
+                            {% for g in config.group_sources %}
+                            <div class="list-item">
+                                <input type="text" class="gs-name" value="{{ g.name }}" placeholder="群备注名">
+                                <input type="text" class="gs-group-id" value="{{ g.group_id }}" placeholder="群号">
+                                <label class="switch" title="启用">
+                                    <input type="checkbox" class="gs-enabled" {{ "checked" if g.enabled }}>
+                                    <span class="slider"></span>
+                                </label>
+                                <label class="switch" title="自动导入成员">
+                                    <input type="checkbox" class="gs-auto-import" {{ "checked" if g.auto_import }}>
+                                    <span class="slider"></span>
+                                </label>
+                                <button class="btn-icon" onclick="this.parentElement.remove()">✕</button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <div class="btn-group" style="margin-top:8px">
+                            <button class="btn btn-sm btn-outline" onclick="addGroupSource()">＋ 添加群来源</button>
+                            <button class="btn btn-sm btn-outline" onclick="importGroupMembers()">📥 从群导入成员</button>
+                        </div>
+                        <div id="groupImportResult" class="test-result" style="margin-top:8px"></div>
+                    </div>
+
+                    <!-- 监控列表 -->
+                    <div class="tab-content" id="tab-monitor">
+                        <p class="help-text">监控这些 QQ 用户的 QQ 空间动态</p>
+                        <div id="monitorList">
+                            {% for m in config.monitor_list %}
+                            <div class="list-item">
+                                <input type="text" class="monitor-name" value="{{ m.name }}" placeholder="备注名">
+                                <input type="text" class="monitor-uin" value="{{ m.uin }}" placeholder="QQ号">
+                                <label class="switch">
+                                    <input type="checkbox" class="monitor-enabled" {{ "checked" if m.enabled }}>
+                                    <span class="slider"></span>
+                                </label>
+                                <button class="btn-icon" onclick="this.parentElement.remove()">✕</button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="addMonitor()">＋ 添加监控目标</button>
+                    </div>
+
+                    <!-- 转发列表 -->
+                    <div class="tab-content" id="tab-forward">
+                        <p class="help-text">将匹配的动态转发到这些目标</p>
+                        <div id="forwardList">
+                            {% for f in config.forward_list %}
+                            <div class="list-item">
+                                <select class="forward-type">
+                                    <option value="group" {{ "selected" if f.type == 'group' }}>群聊</option>
+                                    <option value="private" {{ "selected" if f.type == 'private' }}>私聊</option>
+                                </select>
+                                <input type="text" class="forward-id" value="{{ f.id }}" placeholder="群号/QQ号">
+                                <input type="text" class="forward-name" value="{{ f.name }}" placeholder="备注名">
+                                <label class="switch">
+                                    <input type="checkbox" class="forward-enabled" {{ "checked" if f.enabled }}>
+                                    <span class="slider"></span>
+                                </label>
+                                <button class="btn-icon" onclick="this.parentElement.remove()">✕</button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <button class="btn btn-sm btn-outline" onclick="addForward()">＋ 添加转发目标</button>
+                    </div>
+
+                    <!-- 动作配置（点赞/评论） -->
+                    <div class="tab-content" id="tab-actions">
+                        <p class="help-text">匹配到关键词后，对原说说执行的操作</p>
+
+                        <!-- 操作开关 -->
+                        <div class="action-toggles">
+                            <label class="toggle-item">
+                                <input type="checkbox" id="actForward" {{ "checked" if config.actions.forward }}>
+                                <span>📤 转发</span>
+                            </label>
+                            <label class="toggle-item">
+                                <input type="checkbox" id="actLike" {{ "checked" if config.actions.like }}>
+                                <span>👍 点赞</span>
+                            </label>
+                            <label class="toggle-item">
+                                <input type="checkbox" id="actComment" {{ "checked" if config.actions.comment }}>
+                                <span>💬 评论</span>
+                            </label>
+                        </div>
+
+                        <!-- 评论模式切换 -->
+                        <div id="commentSettings" style="{{ '' if config.actions.comment else 'display:none' }}">
+                            <div class="form-group" style="margin-top:12px">
+                                <label>评论生成模式</label>
+                                <select id="commentMode" onchange="toggleCommentMode()">
+                                    <option value="template" {{ "selected" if config.actions.comment_mode == 'template' }}>📋 模板模式</option>
+                                    <option value="ai" {{ "selected" if config.actions.comment_mode == 'ai' }}>🤖 AI 模式</option>
+                                </select>
+                            </div>
+
+                            <!-- 模板模式 -->
+                            <div id="templateSettings" style="{{ '' if config.actions.comment_mode == 'template' else 'display:none' }}">
+                                <p class="help-text">
+                                    每行一个模板，支持变量: <code>{nickname}</code> <code>{content}</code> <code>{time}</code><br>
+                                    行尾加 <code>|权重</code> 可控制选中概率（默认 1）
+                                </p>
+                                <div class="form-group">
+                                    <textarea id="commentTemplates" rows="6">{% for t in config.actions.comment_templates %}{{ t.content }}|{{ t.weight }}
+{% endfor %}</textarea>
+                                </div>
+                                <button class="btn btn-sm" onclick="testCommentTemplate()">🧪 测试生成</button>
+                                <span id="testCommentResult" class="test-result"></span>
+                            </div>
+
+                            <!-- AI 模式 -->
+                            <div id="aiSettings" style="{{ '' if config.actions.comment_mode == 'ai' else 'display:none' }}">
+                                <div class="form-group">
+                                    <label>API 地址</label>
+                                    <input type="text" id="aiApiUrl" value="{{ config.actions.ai.api_url }}" placeholder="https://api.deepseek.com/v1/chat/completions">
+                                </div>
+                                <div class="form-group">
+                                    <label>API Key</label>
+                                    <input type="password" id="aiApiKey" value="{{ config.actions.ai.api_key[:6] + '***' if config.actions.ai.api_key else '' }}" placeholder="sk-...">
+                                </div>
+                                <div class="form-group">
+                                    <label>模型</label>
+                                    <input type="text" id="aiModel" value="{{ config.actions.ai.model }}" placeholder="deepseek-chat">
+                                </div>
+                                <div class="form-group">
+                                    <label>系统提示词</label>
+                                    <textarea id="aiSystemPrompt" rows="3">{{ config.actions.ai.system_prompt }}</textarea>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>最大 Token</label>
+                                        <input type="number" id="aiMaxTokens" value="{{ config.actions.ai.max_tokens }}" min="20" max="500">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>温度 (0-2)</label>
+                                        <input type="number" id="aiTemperature" value="{{ config.actions.ai.temperature }}" min="0" max="2" step="0.1">
+                                    </div>
+                                </div>
+                                <button class="btn btn-sm" onclick="testCommentAI()">🧪 测试 AI 生成</button>
+                                <span id="testAIResult" class="test-result"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="btn btn-primary" onclick="saveConfig()">💾 保存配置</button>
+                        <span id="saveConfigResult" class="test-result"></span>
+                    </div>
+                </section>
+
+                <!-- 测试抓取 -->
+                <section class="card">
+                    <h2>🧪 测试抓取说说</h2>
+                    <div class="form-group-inline">
+                        <input type="text" id="testFetchUin" placeholder="输入 QQ 号">
+                        <button class="btn btn-sm" onclick="testFetch()">抓取</button>
+                    </div>
+                    <div id="testFetchResult"></div>
+                </section>
+            </div>
+
+            <!-- 右侧面板 -->
+            <div class="right-panel">
+                <!-- 转发日志 -->
+                <section class="card">
+                    <h2>📋 操作记录</h2>
+                    <div class="log-list" id="forwardLog">
+                        {% for r in recent_forwarded %}
+                        <div class="log-item">
+                            <span class="log-time">{{ r.forwarded_at }}</span>
+                            <span class="log-uin">{{ r.uin }}</span>
+                            <span class="log-content">{{ r.content_short }}</span>
+                        </div>
+                        {% endfor %}
+                        {% if not recent_forwarded %}
+                        <div class="log-empty">暂无记录</div>
+                        {% endif %}
+                    </div>
+                </section>
+
+                <!-- 使用说明 -->
+                <section class="card">
+                    <h2>📖 快速开始</h2>
+                    <ol class="guide">
+                        <li><strong>扫码登录</strong> - 点击左侧「📱 扫码登录」，用手机 QQ 扫描二维码，Cookies 自动写入配置</li>
+                        <li><strong>启动 OneBot</strong> - 启动 Lagrange / go-cqhttp，开启 HTTP API（默认 5700 端口）</li>
+                        <li><strong>添加监控</strong> - 在「群来源」添加群号（自动导入全群成员），或手动添加 QQ 号</li>
+                        <li><strong>配置动作</strong> - 在「动作」开启转发/点赞/评论，设置模板或 AI</li>
+                        <li><strong>一键启动</strong> - 点击「⚡ 一键启动」，自动导入群成员并开始监控</li>
+                    </ol>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ========== 状态刷新 ==========
+        async function refreshStatus() {
+            try {
+                const r = await fetch('/api/status');
+                const data = await r.json();
+
+                // 调度器状态
+                const schedEl = document.getElementById('schedulerStatus');
+                schedEl.textContent = data.scheduler.running ? '🟢 运行中' : '🔴 已停止';
+                schedEl.className = 'status-badge ' + (data.scheduler.running ? 'status-on' : 'status-off');
+
+                document.getElementById('btnStart').disabled = data.scheduler.running;
+                document.getElementById('btnStop').disabled = !data.scheduler.running;
+
+                // 快速启动卡片状态
+                const qsSchedEl = document.getElementById('qsSchedulerStatus');
+                if (qsSchedEl) {
+                    qsSchedEl.textContent = data.scheduler.running ? '✅ 运行中' : '未运行';
+                    qsSchedEl.className = 'qs-step-status ' + (data.scheduler.running ? 'success' : '');
+                }
+                const qsObEl = document.getElementById('qsOnebotStatus');
+                if (qsObEl) {
+                    qsObEl.textContent = data.onebot_online ? '✅ 在线' : '❌ 离线';
+                    qsObEl.className = 'qs-step-status ' + (data.onebot_online ? 'success' : 'error');
+                }
+
+                // 统计
+                if (data.scheduler.stats) {
+                    document.getElementById('statChecked').textContent = data.scheduler.stats.total_checked || 0;
+                    document.getElementById('statMatched').textContent = data.scheduler.stats.total_matched || 0;
+                    document.getElementById('statForwarded').textContent = data.forwarded_total || 0;
+                    document.getElementById('statLiked').textContent = data.scheduler.stats.total_liked || 0;
+                    document.getElementById('statCommented').textContent = data.scheduler.stats.total_commented || 0;
+                }
+
+                // OneBot 状态
+                const obEl = document.getElementById('onebotStatus');
+                obEl.textContent = data.onebot_online ? '🟢 OneBot 在线' : '🔴 OneBot 离线';
+                obEl.className = 'status-badge ' + (data.onebot_online ? 'status-on' : 'status-off');
+            } catch (e) {
+                console.error('状态刷新失败', e);
+            }
+        }
+        setInterval(refreshStatus, 5000);
+        refreshStatus();
+
+        // ========== 扫码登录 ==========
+        let qrPollTimer = null;
+
+        async function startQRLogin() {
+            const btn = document.getElementById('btnQRLogin');
+            btn.disabled = true;
+            btn.textContent = '获取二维码中...';
+            try {
+                const r = await fetch('/api/login/qrcode', { method: 'POST' });
+                const data = await r.json();
+                if (!data.success) {
+                    setLoginStatus('❌ ' + (data.message || '获取二维码失败'), 'error');
+                    return;
+                }
+                document.getElementById('qrImage').src = data.qrcode;
+                document.getElementById('qrContainer').style.display = 'block';
+                setLoginStatus('等待扫码...', '');
+                startQRPoll();
+            } catch (e) {
+                setLoginStatus('❌ 网络错误: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📱 扫码登录';
+            }
+        }
+
+        function startQRPoll() {
+            stopQRPoll();
+            qrPollTimer = setInterval(pollLogin, 2000);
+        }
+
+        function stopQRPoll() {
+            if (qrPollTimer) {
+                clearInterval(qrPollTimer);
+                qrPollTimer = null;
+            }
+        }
+
+        async function pollLogin() {
+            try {
+                const r = await fetch('/api/login/poll');
+                const data = await r.json();
+                if (data.logged_in) {
+                    stopQRPoll();
+                    setLoginStatus('✅ 登录成功: ' + (data.nickname || data.uin || ''), 'success');
+                    // 配置已自动保存，刷新页面展示最新状态
+                    setTimeout(() => location.reload(), 1200);
+                    return;
+                }
+                const statusMap = {
+                    waiting: '等待扫码...',
+                    scanned: '已扫码，请在手机上确认登录',
+                    expired: '二维码已过期，请点击「刷新二维码」',
+                    error: '登录出错: ' + (data.message || ''),
+                    unknown: '状态异常，请刷新二维码重试',
+                };
+                const text = statusMap[data.status] || data.message || data.status || '未知状态';
+                setLoginStatus(text, (data.status === 'expired' || data.status === 'error') ? 'error' : '');
+                if (data.status === 'expired') {
+                    stopQRPoll();
+                }
+            } catch (e) {
+                setLoginStatus('❌ 轮询失败: ' + e.message, 'error');
+                stopQRPoll();
+            }
+        }
+
+        function setLoginStatus(text, cls) {
+            const el = document.getElementById('loginStatus');
+            el.textContent = text;
+            el.className = 'qs-step-status' + (cls ? ' ' + cls : '');
+            const txt = document.getElementById('qrStatusText');
+            if (txt) {
+                txt.textContent = text;
+                txt.className = 'test-result' + (cls ? ' ' + cls : '');
+            }
+        }
+
+        async function refreshLoginStatus() {
+            try {
+                const r = await fetch('/api/login/status');
+                const data = await r.json();
+                const el = document.getElementById('loginStatus');
+                if (data.logged_in) {
+                    el.textContent = '✅ 已登录: ' + (data.nickname || data.uin || '');
+                    el.className = 'qs-step-status success';
+                } else {
+                    el.textContent = '未登录';
+                    el.className = 'qs-step-status';
+                }
+            } catch (e) {
+                const el = document.getElementById('loginStatus');
+                el.textContent = '未登录';
+                el.className = 'qs-step-status';
+            }
+        }
+        refreshLoginStatus();
+
+        // ========== 一键启动 ==========
+        async function quickStart() {
+            const btn = document.getElementById('btnQuickStart');
+            const resultEl = document.getElementById('quickStartResult');
+            btn.disabled = true;
+            resultEl.textContent = '启动中...';
+            resultEl.className = 'test-result';
+            try {
+                const r = await fetch('/api/quickstart', { method: 'POST' });
+                const data = await r.json();
+                if (data.success) {
+                    resultEl.textContent = '✅ ' + data.message;
+                    resultEl.className = 'test-result success';
+                } else {
+                    const stepHint = {
+                        login: '请先完成步骤 1 扫码登录',
+                        onebot: '请先启动 OneBot 客户端（步骤 2）',
+                        monitor: '请先在「群来源」或「监控列表」中添加要监控的 QQ',
+                        action: '请先在「动作」或「转发列表」中配置要执行的操作',
+                    }[data.step] || '';
+                    resultEl.textContent = '⚠️ ' + data.message + (stepHint ? '（' + stepHint + '）' : '');
+                    resultEl.className = 'test-result error';
+                }
+                refreshStatus();
+            } catch (e) {
+                resultEl.textContent = '❌ 启动失败: ' + e.message;
+                resultEl.className = 'test-result error';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ========== 调度器控制 ==========
+        async function schedulerStart() {
+            await fetch('/api/scheduler/start', { method: 'POST' });
+            refreshStatus();
+        }
+        async function schedulerStop() {
+            await fetch('/api/scheduler/stop', { method: 'POST' });
+            refreshStatus();
+        }
+
+        // ========== 标签切换 ==========
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                this.classList.add('active');
+                document.getElementById(this.dataset.tab).classList.add('active');
+            });
+        });
+
+        // ========== 评论模式切换 ==========
+        function toggleCommentMode() {
+            const mode = document.getElementById('commentMode').value;
+            document.getElementById('templateSettings').style.display = mode === 'template' ? '' : 'none';
+            document.getElementById('aiSettings').style.display = mode === 'ai' ? '' : 'none';
+        }
+
+        document.getElementById('actComment')?.addEventListener('change', function() {
+            document.getElementById('commentSettings').style.display = this.checked ? '' : 'none';
+        });
+
+        // ========== 测试功能 ==========
+        async function testOnebot() {
+            const btn = event.target;
+            btn.disabled = true;
+            const resultEl = document.getElementById('testOnebotResult');
+            resultEl.textContent = '检测中...';
+            try {
+                const r = await fetch('/api/test/onebot', { method: 'POST' });
+                const data = await r.json();
+                resultEl.textContent = data.message;
+                resultEl.className = 'test-result ' + (data.success ? 'success' : 'error');
+            } catch(e) {
+                resultEl.textContent = '请求失败';
+                resultEl.className = 'test-result error';
+            }
+            btn.disabled = false;
+        }
+
+        async function testQzone() {
+            const btn = event.target;
+            btn.disabled = true;
+            const resultEl = document.getElementById('testQzoneResult');
+            resultEl.textContent = '检测中...';
+            try {
+                const r = await fetch('/api/test/qzone', { method: 'POST' });
+                const data = await r.json();
+                resultEl.textContent = data.message;
+                resultEl.className = 'test-result ' + (data.success ? 'success' : 'error');
+            } catch(e) {
+                resultEl.textContent = '请求失败';
+                resultEl.className = 'test-result error';
+            }
+            btn.disabled = false;
+        }
+
+        async function testFetch() {
+            const uin = document.getElementById('testFetchUin').value.trim();
+            if (!uin) return alert('请输入 QQ 号');
+            const resultEl = document.getElementById('testFetchResult');
+            resultEl.innerHTML = '抓取中...';
+            try {
+                const r = await fetch('/api/test/fetch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({uin: uin}),
+                });
+                const data = await r.json();
+                if (data.success && data.posts.length > 0) {
+                    let html = '<div class="fetch-posts">';
+                    data.posts.forEach(p => {
+                        html += `<div class="fetch-post">
+                            <div class="fetch-time">${p.create_time || ''}</div>
+                            <div class="fetch-content">${escapeHtml(p.content || '(无文字)')}</div>
+                            ${p.pictures && p.pictures.length ? `<div class="fetch-pics">📷 ${p.pictures.length} 张图</div>` : ''}
+                        </div>`;
+                    });
+                    html += '</div>';
+                    resultEl.innerHTML = html;
+                } else {
+                    resultEl.innerHTML = '<span class="error">未获取到说说或 Cookies 已过期</span>';
+                }
+            } catch(e) {
+                resultEl.innerHTML = '<span class="error">请求失败</span>';
+            }
+        }
+
+        async function testCommentTemplate() {
+            const resultEl = document.getElementById('testCommentResult');
+            resultEl.textContent = '生成中...';
+            try {
+                const r = await fetch('/api/test/comment', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mode: 'template', content: '今天天气真好，出去玩！', nickname: '小明'}),
+                });
+                const data = await r.json();
+                resultEl.textContent = '💬 ' + (data.comment || '生成失败');
+                resultEl.className = 'test-result ' + (data.success ? 'success' : 'error');
+            } catch(e) {
+                resultEl.textContent = '请求失败';
+                resultEl.className = 'test-result error';
+            }
+        }
+
+        async function testCommentAI() {
+            const resultEl = document.getElementById('testAIResult');
+            resultEl.textContent = 'AI 生成中...';
+            try {
+                const r = await fetch('/api/test/comment', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mode: 'ai', content: '今天天气真好，出去玩！', nickname: '小明'}),
+                });
+                const data = await r.json();
+                resultEl.textContent = '🤖 ' + (data.comment || '生成失败');
+                resultEl.className = 'test-result ' + (data.success ? 'success' : 'error');
+            } catch(e) {
+                resultEl.textContent = '请求失败';
+                resultEl.className = 'test-result error';
+            }
+        }
+
+        // ========== 群导入 ==========
+        async function importGroupMembers() {
+            const groupId = prompt('请输入要导入成员的群号：');
+            if (!groupId) return;
+
+            const resultEl = document.getElementById('groupImportResult');
+            resultEl.textContent = '获取群成员中...';
+            try {
+                const r = await fetch('/api/group/import', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({group_id: groupId}),
+                });
+                const data = await r.json();
+                if (data.success) {
+                    resultEl.textContent = `✅ ${data.message}`;
+                    resultEl.className = 'test-result success';
+                    // 刷新页面显示新成员
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    resultEl.textContent = '❌ ' + data.message;
+                    resultEl.className = 'test-result error';
+                }
+            } catch(e) {
+                resultEl.textContent = '请求失败: ' + e.message;
+                resultEl.className = 'test-result error';
+            }
+        }
+
+        // ========== 动态列表管理 ==========
+        function addMonitor() {
+            const container = document.getElementById('monitorList');
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+                <input type="text" class="monitor-name" placeholder="备注名">
+                <input type="text" class="monitor-uin" placeholder="QQ号">
+                <label class="switch">
+                    <input type="checkbox" class="monitor-enabled" checked>
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-icon" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
+        function addForward() {
+            const container = document.getElementById('forwardList');
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+                <select class="forward-type">
+                    <option value="group">群聊</option>
+                    <option value="private">私聊</option>
+                </select>
+                <input type="text" class="forward-id" placeholder="群号/QQ号">
+                <input type="text" class="forward-name" placeholder="备注名">
+                <label class="switch">
+                    <input type="checkbox" class="forward-enabled" checked>
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-icon" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
+        function addGroupSource() {
+            const container = document.getElementById('groupSourceList');
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+                <input type="text" class="gs-name" placeholder="群备注名">
+                <input type="text" class="gs-group-id" placeholder="群号">
+                <label class="switch" title="启用">
+                    <input type="checkbox" class="gs-enabled" checked>
+                    <span class="slider"></span>
+                </label>
+                <label class="switch" title="自动导入成员">
+                    <input type="checkbox" class="gs-auto-import" checked>
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-icon" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
+        // ========== 保存配置 ==========
+        async function saveConfig() {
+            const btn = event.target;
+            btn.disabled = true;
+            const resultEl = document.getElementById('saveConfigResult');
+            resultEl.textContent = '保存中...';
+
+            // 收集监控列表
+            const monitorList = [];
+            document.querySelectorAll('#monitorList .list-item').forEach(item => {
+                monitorList.push({
+                    name: item.querySelector('.monitor-name').value,
+                    uin: item.querySelector('.monitor-uin').value,
+                    enabled: item.querySelector('.monitor-enabled').checked,
+                });
+            });
+
+            // 收集群来源
+            const groupSources = [];
+            document.querySelectorAll('#groupSourceList .list-item').forEach(item => {
+                groupSources.push({
+                    name: item.querySelector('.gs-name').value,
+                    group_id: item.querySelector('.gs-group-id').value,
+                    enabled: item.querySelector('.gs-enabled').checked,
+                    auto_import: item.querySelector('.gs-auto-import').checked,
+                });
+            });
+
+            // 收集转发列表
+            const forwardList = [];
+            document.querySelectorAll('#forwardList .list-item').forEach(item => {
+                forwardList.push({
+                    type: item.querySelector('.forward-type').value,
+                    id: item.querySelector('.forward-id').value,
+                    name: item.querySelector('.forward-name').value,
+                    enabled: item.querySelector('.forward-enabled').checked,
+                });
+            });
+
+            // 收集关键词
+            const keywords = document.getElementById('keywordsText').value
+                .split('\n')
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            // 收集评论模板
+            const commentTemplates = [];
+            document.getElementById('commentTemplates')?.value.split('\n')
+                .map(s => s.trim())
+                .filter(s => s.length > 0)
+                .forEach(line => {
+                    const parts = line.split('|');
+                    commentTemplates.push({
+                        content: parts[0].trim(),
+                        weight: parseInt(parts[1]) || 1,
+                    });
+                });
+
+            const payload = {
+                qzone: {
+                    cookies: document.getElementById('qzoneCookies').value,
+                    uin: document.getElementById('qzoneUin').value,
+                    poll_interval: parseInt(document.getElementById('qzonePollInterval').value) || 60,
+                },
+                onebot: {
+                    host: document.getElementById('onebotHost').value,
+                    port: parseInt(document.getElementById('onebotPort').value) || 5700,
+                    access_token: document.getElementById('onebotToken').value,
+                },
+                keywords: keywords,
+                monitor_list: monitorList,
+                group_sources: groupSources,
+                forward_list: forwardList,
+                actions: {
+                    forward: document.getElementById('actForward')?.checked ?? true,
+                    like: document.getElementById('actLike')?.checked ?? false,
+                    comment: document.getElementById('actComment')?.checked ?? false,
+                    comment_mode: document.getElementById('commentMode')?.value ?? 'template',
+                    comment_templates: commentTemplates.length > 0 ? commentTemplates : [{content: '说得好！', weight: 1}],
+                    ai: {
+                        enabled: document.getElementById('commentMode')?.value === 'ai',
+                        api_url: document.getElementById('aiApiUrl')?.value || '',
+                        api_key: document.getElementById('aiApiKey')?.value || '',
+                        model: document.getElementById('aiModel')?.value || 'deepseek-chat',
+                        system_prompt: document.getElementById('aiSystemPrompt')?.value || '',
+                        max_tokens: parseInt(document.getElementById('aiMaxTokens')?.value) || 100,
+                        temperature: parseFloat(document.getElementById('aiTemperature')?.value) || 0.8,
+                    },
+                },
+            };
+
+            try {
+                const r = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                });
+                const data = await r.json();
+                resultEl.textContent = data.message;
+                resultEl.className = 'test-result ' + (data.success ? 'success' : 'error');
+                if (data.success) {
+                    setTimeout(() => refreshStatus(), 1000);
+                }
+            } catch(e) {
+                resultEl.textContent = '保存失败: ' + e.message;
+                resultEl.className = 'test-result error';
+            }
+            btn.disabled = false;
+        }
+
+        // ========== 工具函数 ==========
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
